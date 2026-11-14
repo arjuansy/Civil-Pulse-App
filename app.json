@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Civic Pulse",
+    "slug": "civic-pulse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "plugins": [
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Izinkan Civic Pulse mengakses lokasi saat aplikasi digunakan untuk menampilkan posisi Anda di peta."
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.civicpulse.app"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Civic Pulse menggunakan lokasi Anda untuk menampilkan posisi pada peta laporan warga."
+      }
+    }
+  }
+}
