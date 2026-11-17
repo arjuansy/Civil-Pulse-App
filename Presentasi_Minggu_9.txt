@@ -1,0 +1,268 @@
+PRESENTASI MINGGU KE-9
+Milestone 1 - Inisialisasi Modul LBS & Interactive Mapping Engine
+Proyek: Civic Pulse
+
+============================================================
+1. TUJUAN PRESENTASI
+============================================================
+
+Menjelaskan implementasi Location-Based Services (LBS), peta interaktif,
+pelacakan lokasi, marker kustom, dan perhitungan jarak garis lurus
+menggunakan rumus Haversine.
+
+Sub-CPMK 7:
+Mahasiswa mampu mengintegrasikan layanan berbasis lokasi (LBS), pemetaan
+interaktif, dan komputasi spasial pada aplikasi mobile.
+
+============================================================
+2. PEMETAAN DELIVERABLE KE KODE PROYEK
+============================================================
+
+A. Konfigurasi react-native-maps dan expo-location
+
+File:
+- package.json, bagian dependencies
+  Memuat paket react-native-maps dan expo-location.
+- app.json, bagian plugins dan iOS infoPlist
+  Mengatur plugin expo-location serta keterangan izin lokasi.
+- App.tsx, import MapView dan Marker
+  Memakai komponen peta dan marker.
+
+Bagian kode app.json:
+
+[
+  "expo-location",
+  {
+    "locationWhenInUsePermission":
+      "Izinkan Civic Pulse mengakses lokasi saat aplikasi digunakan ..."
+  }
+]
+
+Pada iOS, NSLocationWhenInUseUsageDescription menjelaskan bahwa lokasi
+digunakan untuk menampilkan posisi pada peta laporan warga.
+
+B. Peta interaktif dan Custom Markers
+
+File: App.tsx, sekitar baris 131-173.
+
+Bagian kode peta:
+
+<MapView
+  ref={mapRef}
+  style={StyleSheet.absoluteFill}
+  initialRegion={INITIAL_REGION}
+  showsUserLocation={isTracking}
+  showsCompass
+>
+  {reports.map((report) => (
+    <Marker
+      key={report.id}
+      coordinate={{
+        latitude: report.latitude,
+        longitude: report.longitude,
+      }}
+      onPress={() => setSelectedReportId(report.id)}
+    >
+      ... tampilan marker kustom ...
+    </Marker>
+  ))}
+</MapView>
+
+Warna kategori di App.tsx, sekitar baris 27-31:
+
+const CATEGORY_COLORS: Record<ReportCategory, string> = {
+  Jalan: "#ef6b52",
+  Banjir: "#3988e8",
+  Fasilitas: "#e5a62c",
+};
+
+Isi marker kustom menampilkan simbol berbeda:
+- Jalan: !
+- Banjir: ~
+- Fasilitas: +
+
+Peta juga dapat diarahkan ke laporan yang dipilih. Tombol pada kartu laporan
+memanggil focusReport, memilih laporan, lalu menggerakkan kamera peta.
+Lihat App.tsx, sekitar baris 80-98 dan 245-270.
+
+C. Pelacakan lokasi dengan interval adaptif
+
+File: src/hooks/useLocationTracking.ts.
+
+Fungsi getAdaptiveDistanceInterval, sekitar baris 5-15:
+
+function getAdaptiveDistanceInterval(speed: number | null): number {
+  if (speed === null || !Number.isFinite(speed) || speed < 1.5) {
+    return 8;
+  }
+  if (speed < 6) {
+    return 20;
+  }
+  return 40;
+}
+
+Arti interval:
+- Kecepatan tidak diketahui atau di bawah 1.5 m/s: distanceInterval 8 meter.
+- Kecepatan 1.5 sampai di bawah 6 m/s: distanceInterval 20 meter.
+- Kecepatan 6 m/s atau lebih: distanceInterval 40 meter.
+
+Alur izin dan lokasi awal, sekitar baris 31-48:
+
+const permission = await Location.requestForegroundPermissionsAsync();
+if (!permission.granted) {
+  setError("Izin lokasi belum diberikan ...");
+  return;
+}
+
+const currentLocation = await Location.getCurrentPositionAsync({
+  accuracy: Location.Accuracy.Balanced,
+});
+setLocation(currentLocation);
+setDistanceInterval(
+  getAdaptiveDistanceInterval(currentLocation.coords.speed),
+);
+setIsTracking(true);
+
+Pembaruan saat tracking aktif, sekitar baris 68-96:
+
+const nextSubscription = await Location.watchPositionAsync(
+  {
+    accuracy: Location.Accuracy.Balanced,
+    distanceInterval,
+    timeInterval: 3000,
+  },
+  (nextLocation) => {
+    setLocation(nextLocation);
+    // Interval dihitung kembali dari kecepatan lokasi terbaru.
+  },
+);
+
+Catatan untuk presentasi:
+distanceInterval adalah ambang perpindahan untuk pembaruan lokasi, bukan
+jarak pengguna ke laporan. timeInterval diset 3000 ms. Pelacakan memakai
+izin foreground (saat aplikasi digunakan), bukan background tracking.
+
+D. Perhitungan jarak menggunakan Haversine
+
+File: src/geo/haversine.ts.
+
+Konstanta dan fungsi utama, sekitar baris 1-27:
+
+const EARTH_RADIUS_METERS = 6_371_000;
+
+export function haversineDistanceMeters(
+  first: { latitude: number; longitude: number },
+  second: { latitude: number; longitude: number },
+): number {
+  const latitudeDelta = toRadians(second.latitude - first.latitude);
+  const longitudeDelta = toRadians(second.longitude - first.longitude);
+  const firstLatitude = toRadians(first.latitude);
+  const secondLatitude = toRadians(second.latitude);
+
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(firstLatitude) *
+      Math.cos(secondLatitude) *
+      Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * EARTH_RADIUS_METERS *
+    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+Pada kode sebenarnya, nilai haversine dibatasi maksimum 1 untuk menjaga
+stabilitas perhitungan numerik.
+
+Pemakaian jarak:
+- App.tsx, sekitar baris 37-45: getReportDistance memanggil
+  haversineDistanceMeters untuk membandingkan lokasi pengguna dengan laporan.
+- src/geo/haversine.ts, sekitar baris 29-37: formatDistance menampilkan
+  hasil dalam meter atau kilometer.
+
+Penjelasan penting:
+Haversine menghasilkan jarak garis lurus di permukaan bumi. Hasilnya bukan
+jarak perjalanan atau rute jalan.
+
+============================================================
+3. DATA DEMO DAN BATASAN IMPLEMENTASI
+============================================================
+
+File: src/domain/reports.ts.
+
+createDemoReports menempatkan laporan contoh dengan offset meter terhadap
+titik tengah. Jika lokasi pengguna sudah tersedia, App.tsx memakai koordinat
+tersebut sebagai titik tengah laporan contoh.
+
+Data yang muncul di aplikasi belum diambil dari server/backend. Ini penting
+untuk disebutkan agar demo tidak terkesan memakai data warga sungguhan.
+
+Posisi awal peta menggunakan koordinat Bandung:
+latitude  -6.9175
+longitude 107.6191
+
+============================================================
+4. ALUR DEMO SAAT PRESENTASI
+============================================================
+
+Persiapan:
+1. Jalankan aplikasi di perangkat atau emulator yang mendukung lokasi.
+2. Pastikan internet dan layanan lokasi perangkat aktif.
+3. Izinkan akses lokasi ketika aplikasi meminta izin.
+4. Jika memakai development build Android sendiri, pastikan API key Google
+   Maps sudah dikonfigurasi. File .env.example saat ini masih kosong.
+
+Demo:
+1. Tampilkan halaman awal dan jelaskan peta serta marker kategori.
+2. Pilih kartu laporan dan tunjukkan peta mengarah ke titik tersebut.
+3. Tekan tombol lokasi dan jelaskan permintaan izin foreground.
+4. Setelah izin diberikan, tunjukkan posisi pengguna pada peta dan jarak
+   laporan pada kartu.
+5. Tunjukkan status interval lokasi jika terlihat, lalu tekan tombol lokasi
+   kembali untuk menghentikan tracking.
+
+Pemeriksaan TypeScript sebelum presentasi:
+npm run typecheck
+
+============================================================
+5. CONTOH NARASI PRESENTASI
+============================================================
+
+"Pada pertemuan kesembilan, saya mengimplementasikan dasar Location-Based
+Services pada Civic Pulse. Peta dibuat menggunakan react-native-maps dan
+menampilkan marker kustom untuk kategori jalan, banjir, dan fasilitas.
+
+"Ketika pengguna menekan tombol lokasi, aplikasi meminta izin foreground
+melalui expo-location. Setelah izin diberikan, aplikasi mengambil lokasi
+awal dan mengaktifkan pembaruan lokasi. Interval pembaruan menyesuaikan
+kecepatan pengguna, yaitu 8, 20, atau 40 meter.
+
+"Jarak antara pengguna dan laporan dihitung menggunakan Haversine dan
+ditampilkan dalam meter atau kilometer. Nilai ini merupakan jarak garis
+lurus, bukan rute jalan. Untuk milestone ini, laporan yang ditampilkan masih
+berupa titik data contoh."
+
+============================================================
+6. PERTANYAAN YANG MUNGKIN DITANYAKAN
+============================================================
+
+T: Apa itu LBS?
+J: Fitur aplikasi yang menggunakan informasi lokasi perangkat untuk
+   memberikan fungsi yang relevan dengan posisi pengguna.
+
+T: Mengapa menggunakan Haversine?
+J: Untuk menghitung jarak antara dua koordinat geografis dengan
+   memperhitungkan bahwa bumi berbentuk mendekati bola.
+
+T: Apakah jarak yang tampil mengikuti jalan?
+J: Tidak. Haversine menghitung jarak garis lurus, belum menghitung rute jalan.
+
+T: Mengapa intervalnya adaptif?
+J: Agar ambang pembaruan posisi dapat menyesuaikan kecepatan gerak pengguna.
+   Interval ini berbeda dari jarak pengguna ke laporan.
+
+T: Apakah laporan berasal dari database?
+J: Belum. Laporan saat ini adalah data contoh untuk demonstrasi peta dan
+   perhitungan jarak.
+
+T: Apakah aplikasi melacak lokasi di background?
+J: Tidak. Implementasi saat ini meminta izin foreground dan tracking aktif
+   saat fitur lokasi digunakan di dalam aplikasi.
