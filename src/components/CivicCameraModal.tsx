@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { CameraType, CameraView } from "expo-camera";
 import { saveReportPhoto } from "../storage/reportFileManager";
+import { Colors, Radius, Shadow, Size, Spacing, Typography } from "../design/tokens";
 
 interface CivicCameraModalProps {
   visible: boolean;
@@ -32,9 +33,7 @@ export function CivicCameraModal({
   };
 
   const handleCapture = async () => {
-    if (!cameraRef.current || isCapturing) {
-      return;
-    }
+    if (!cameraRef.current || isCapturing) return;
 
     try {
       setIsCapturing(true);
@@ -44,15 +43,14 @@ export function CivicCameraModal({
       });
 
       if (photo?.uri) {
-        // Simpan langsung ke sandbox documentDirectory
         const savedFile = await saveReportPhoto(
           photo.uri,
           `bukti_kamera_${Date.now()}.jpg`,
         );
 
         Alert.alert(
-          "Foto Berhasil Diambil!",
-          `Kamera aktif dan foto bukti laporan telah tersimpan ke sandbox:\n${savedFile.fileName}`,
+          "Foto Berhasil Diambil",
+          `Foto bukti telah tersimpan ke sandbox lokal:\n${savedFile.fileName}`,
         );
 
         onPhotoSaved(savedFile);
@@ -77,64 +75,78 @@ export function CivicCameraModal({
       presentationStyle="fullScreen"
     >
       <View style={styles.container}>
-        {/* Viewfinder Kamera Live */}
         <CameraView ref={cameraRef} facing={facing} style={StyleSheet.absoluteFill}>
-          {/* Header Overlay */}
-          <View style={styles.headerOverlay}>
+
+          {/* ── TOP OVERLAY ───────────────────────────────────────────── */}
+          <View style={styles.topOverlay}>
+            {/* Status indicator */}
             <View style={styles.statusPill}>
               <View style={styles.statusDot} />
-              <Text style={styles.statusPillText}>KAMERA AKTIF</Text>
+              <Text style={styles.statusText}>KAMERA AKTIF</Text>
             </View>
 
+            {/* Close button */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Tutup kamera"
-              style={styles.circleButton}
+              style={({ pressed }) => [styles.controlBtn, pressed && styles.controlBtnPressed]}
               onPress={onClose}
             >
-              <Text style={styles.closeIcon}>✕</Text>
+              <Text style={styles.controlBtnText}>✕</Text>
             </Pressable>
           </View>
 
-          {/* Area Bantuan Fokus Lapangan */}
+          {/* ── FOCUS GUIDE ───────────────────────────────────────────── */}
           <View style={styles.focusArea}>
-            <View style={styles.focusFrame} />
-            <Text style={styles.focusHint}>
-              Arahkan kamera ke titik kerusakan infrastruktur atau lokasi bencana
-            </Text>
+            {/* Corner marks — cleaner than a full dashed border */}
+            <View style={styles.focusFrame}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+            </View>
+            <View style={styles.focusHintContainer}>
+              <Text style={styles.focusHint}>
+                Arahkan kamera ke titik kerusakan atau lokasi bencana
+              </Text>
+            </View>
           </View>
 
-          {/* Kontrol Shutter Bawah */}
+          {/* ── BOTTOM CONTROLS ───────────────────────────────────────── */}
           <View style={styles.bottomControls}>
+            {/* Flip camera */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Ganti kamera depan atau belakang"
-              style={styles.circleButton}
+              style={({ pressed }) => [styles.controlBtn, pressed && styles.controlBtnPressed]}
               onPress={toggleCameraFacing}
             >
-              <Text style={styles.switchIcon}>🔄</Text>
+              <Text style={styles.controlBtnText}>⟳</Text>
             </Pressable>
 
-            {/* Tombol Shutter Utama */}
+            {/* Shutter */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Ambil foto bukti laporan"
-              style={[
-                styles.shutterButtonOuter,
+              style={({ pressed }) => [
+                styles.shutterOuter,
                 isCapturing && styles.shutterDisabled,
+                pressed && !isCapturing && styles.shutterPressed,
               ]}
               onPress={handleCapture}
               disabled={isCapturing}
             >
               {isCapturing ? (
-                <ActivityIndicator color="#137c68" size="small" />
+                <ActivityIndicator color={Colors.primary} size="small" />
               ) : (
-                <View style={styles.shutterButtonInner} />
+                <View style={styles.shutterInner} />
               )}
             </Pressable>
 
+            {/* Spacer to balance layout */}
             <View style={{ width: 44 }} />
           </View>
+
         </CameraView>
       </View>
     </Modal>
@@ -146,9 +158,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000000",
   },
-  headerOverlay: {
-    paddingTop: Platform.OS === "ios" ? 54 : 36,
-    paddingHorizontal: 20,
+
+  // Top overlay
+  topOverlay: {
+    paddingTop: Platform.OS === "ios" ? 56 : 40,
+    paddingHorizontal: Spacing.lg,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -156,88 +170,128 @@ const styles = StyleSheet.create({
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    gap: 7,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 7,
+    borderRadius: Radius.pill,
+    backgroundColor: "rgba(0,0,0,0.60)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
   },
   statusDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#22C55E",
   },
-  statusPillText: {
-    color: "#ffffff",
+  statusText: {
+    color: Colors.textInverse,
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 0.8,
   },
-  circleButton: {
+  controlBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
   },
-  closeIcon: {
-    color: "#ffffff",
+  controlBtnPressed: {
+    opacity: 0.70,
+  },
+  controlBtnText: {
+    color: Colors.textInverse,
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: "600",
   },
-  switchIcon: {
-    fontSize: 20,
-  },
+
+  // Focus guide
   focusArea: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 32,
+    gap: Spacing.base,
   },
   focusFrame: {
-    width: 260,
-    height: 260,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-    borderStyle: "dashed",
+    width: 240,
+    height: 240,
+    position: "relative",
+  },
+  corner: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    borderColor: "rgba(255,255,255,0.80)",
+  },
+  cornerTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+  },
+  cornerTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+  },
+  cornerBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+  },
+  cornerBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+  },
+  focusHintContainer: {
+    paddingHorizontal: Spacing.base,
+    paddingVertical: 8,
+    borderRadius: Radius.sm,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    maxWidth: 260,
   },
   focusHint: {
-    marginTop: 16,
-    fontSize: 12,
-    color: "rgba(255, 255, 255, 0.85)",
+    ...Typography.caption,
+    color: "rgba(255,255,255,0.90)",
     textAlign: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
   },
+
+  // Bottom controls
   bottomControls: {
-    paddingBottom: Platform.OS === "ios" ? 44 : 30,
-    paddingHorizontal: 30,
+    paddingBottom: Platform.OS === "ios" ? 48 : 32,
+    paddingHorizontal: Spacing.xl,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  shutterButtonOuter: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+  shutterOuter: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     borderWidth: 4,
-    borderColor: "#ffffff",
+    borderColor: Colors.textInverse,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  shutterInner: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: Colors.textInverse,
   },
   shutterDisabled: {
-    opacity: 0.5,
+    opacity: 0.45,
   },
-  shutterButtonInner: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "#ffffff",
+  shutterPressed: {
+    transform: [{ scale: 0.94 }],
   },
 });
