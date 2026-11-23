@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -107,6 +108,9 @@ export default function App() {
   const [fileContentPreview, setFileContentPreview] = useState<string | null>(
     null,
   );
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<
+    string | null
+  >(null);
 
   // Milestone 2 State - 3. Runtime JIT Permissions & Kamera
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -216,6 +220,16 @@ export default function App() {
   };
 
   const handleReadFileDemo = async (fileName: string) => {
+    if (
+      fileName.endsWith(".jpg") ||
+      fileName.endsWith(".jpeg") ||
+      fileName.endsWith(".png")
+    ) {
+      const uri = `${getSandboxDirectoryUri()}${fileName}`;
+      setSelectedPreviewImage(uri);
+      return;
+    }
+
     try {
       const content = await readReportFile(fileName);
       setFileContentPreview(content);
@@ -231,6 +245,12 @@ export default function App() {
       const updated = await listReportFiles();
       setSandboxFiles(updated);
       if (fileContentPreview) setFileContentPreview(null);
+      if (
+        selectedPreviewImage &&
+        selectedPreviewImage.endsWith(fileName)
+      ) {
+        setSelectedPreviewImage(null);
+      }
     }
   };
 
@@ -569,6 +589,31 @@ export default function App() {
                 </Text>
               </Pressable>
 
+              {/* Tampilan Visual Preview Foto dari Sandbox */}
+              {selectedPreviewImage ? (
+                <View style={styles.imagePreviewContainer}>
+                  <View style={styles.imagePreviewHeader}>
+                    <Text style={styles.imagePreviewTitle}>
+                      Foto dari Sandbox:
+                    </Text>
+                    <Pressable
+                      style={styles.closePreviewBtn}
+                      onPress={() => setSelectedPreviewImage(null)}
+                    >
+                      <Text style={styles.closePreviewBtnText}>✕ Tutup</Text>
+                    </Pressable>
+                  </View>
+                  <Image
+                    source={{ uri: selectedPreviewImage }}
+                    style={styles.imagePreview}
+                    resizeMode="cover"
+                  />
+                  <Text style={styles.imagePathText} numberOfLines={2}>
+                    {selectedPreviewImage}
+                  </Text>
+                </View>
+              ) : null}
+
               {/* Daftar Berkas Tersimpan */}
               <View style={styles.fileListContainer}>
                 <Text style={styles.sessionTitle}>
@@ -579,37 +624,45 @@ export default function App() {
                     Belum ada berkas tersimpan di sandbox lokal.
                   </Text>
                 ) : (
-                  sandboxFiles.map((file) => (
-                    <View key={file} style={styles.fileItem}>
-                      <Text style={styles.fileName} numberOfLines={1}>
-                        📄 {file}
-                      </Text>
-                      <View style={styles.fileActions}>
-                        <Pressable
-                          style={styles.fileMiniButton}
-                          onPress={() => handleReadFileDemo(file)}
-                        >
-                          <Text style={styles.fileMiniButtonText}>Baca</Text>
-                        </Pressable>
-                        <Pressable
-                          style={[
-                            styles.fileMiniButton,
-                            styles.fileMiniButtonDelete,
-                          ]}
-                          onPress={() => handleDeleteFileDemo(file)}
-                        >
-                          <Text
-                            style={[
-                              styles.fileMiniButtonText,
-                              styles.fileMiniButtonTextDelete,
-                            ]}
+                  sandboxFiles.map((file) => {
+                    const isImage =
+                      file.endsWith(".jpg") ||
+                      file.endsWith(".jpeg") ||
+                      file.endsWith(".png");
+                    return (
+                      <View key={file} style={styles.fileItem}>
+                        <Text style={styles.fileName} numberOfLines={1}>
+                          {isImage ? "📸" : "📄"} {file}
+                        </Text>
+                        <View style={styles.fileActions}>
+                          <Pressable
+                            style={styles.fileMiniButton}
+                            onPress={() => handleReadFileDemo(file)}
                           >
-                            Hapus
-                          </Text>
-                        </Pressable>
+                            <Text style={styles.fileMiniButtonText}>
+                              {isImage ? "Lihat" : "Baca"}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.fileMiniButton,
+                              styles.fileMiniButtonDelete,
+                            ]}
+                            onPress={() => handleDeleteFileDemo(file)}
+                          >
+                            <Text
+                              style={[
+                                styles.fileMiniButtonText,
+                                styles.fileMiniButtonTextDelete,
+                              ]}
+                            >
+                              Hapus
+                            </Text>
+                          </Pressable>
+                        </View>
                       </View>
-                    </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             </View>
@@ -699,9 +752,10 @@ export default function App() {
       <CivicCameraModal
         visible={isCameraActive}
         onClose={() => setIsCameraActive(false)}
-        onPhotoSaved={async () => {
+        onPhotoSaved={async (saved) => {
           const updated = await listReportFiles();
           setSandboxFiles(updated);
+          setSelectedPreviewImage(saved.localUri);
         }}
       />
     </SafeAreaView>
@@ -1255,5 +1309,46 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#4d605c",
+  },
+  imagePreviewContainer: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+  },
+  imagePreviewHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  imagePreviewTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  closePreviewBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "#dcfce7",
+  },
+  closePreviewBtnText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#15803d",
+  },
+  imagePreview: {
+    width: "100%",
+    height: 180,
+    borderRadius: 8,
+    backgroundColor: "#000000",
+  },
+  imagePathText: {
+    marginTop: 6,
+    fontSize: 9,
+    color: "#65a30d",
   },
 });
