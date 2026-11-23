@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
@@ -16,6 +18,27 @@ import {
 } from "./src/domain/reports";
 import { formatDistance, haversineDistanceMeters } from "./src/geo/haversine";
 import { useLocationTracking } from "./src/hooks/useLocationTracking";
+import {
+  CivicUserSession,
+  deleteSecure,
+  getActiveSession,
+  getSecure,
+  loginUser,
+  logoutUser,
+  SECURE_KEYS,
+} from "./src/storage/secureStore";
+import {
+  createDummyReportPhoto,
+  deleteReportFile,
+  getSandboxDirectoryUri,
+  listReportFiles,
+  readReportFile,
+  saveReportFile,
+} from "./src/storage/reportFileManager";
+import {
+  CivicPermissionType,
+  useJustInTimePermissions,
+} from "./src/hooks/useJustInTimePermissions";
 
 const DEFAULT_CENTER = {
   latitude: -6.9175,
@@ -47,7 +70,12 @@ function getReportDistance(
 
 export default function App() {
   const mapRef = useRef<MapView>(null);
+  const [activeTab, setActiveTab] = useState<"milestone1" | "milestone2">(
+    "milestone1",
+  );
   const [selectedReportId, setSelectedReportId] = useState("report-1");
+
+  // Milestone 1: LBS Tracking
   const {
     location,
     isTracking,
@@ -65,8 +93,47 @@ export default function App() {
   const selectedReport =
     reports.find((report) => report.id === selectedReportId) ?? reports[0];
 
+  // Milestone 2 State - 1. SecureStore
+  const [inputNik, setInputNik] = useState("3201234567890001");
+  const [inputPassword, setInputPassword] = useState("civicpulse123");
+  const [activeSession, setActiveSession] = useState<CivicUserSession | null>(
+    null,
+  );
+  const [rawToken, setRawToken] = useState<string | null>(null);
+
+  // Milestone 2 State - 2. FileSystem Sandbox
+  const [sandboxFiles, setSandboxFiles] = useState<string[]>([]);
+  const [fileContentPreview, setFileContentPreview] = useState<string | null>(
+    null,
+  );
+
+  // Milestone 2 State - 3. Runtime JIT Permissions
+  const {
+    statuses: permissionStatuses,
+    requestJustInTime,
+    openDeviceSettings,
+  } = useJustInTimePermissions();
+
+  // Muat sesi SecureStore & daftar berkas saat aplikasi dibuka
   useEffect(() => {
-    if (!location) {
+    async function loadInitialData() {
+      try {
+        const session = await getActiveSession();
+        setActiveSession(session);
+        const token = await getSecure(SECURE_KEYS.AUTH_TOKEN);
+        setRawToken(token);
+
+        const files = await listReportFiles();
+        setSandboxFiles(files);
+      } catch (err) {
+        console.warn("Gagal memuat data awal:", err);
+      }
+    }
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (!location || activeTab !== "milestone1") {
       return;
     }
 
@@ -79,7 +146,7 @@ export default function App() {
       },
       500,
     );
-  }, [location]);
+  }, [location, activeTab]);
 
   const focusReport = (report: CivicReport) => {
     setSelectedReportId(report.id);
@@ -94,10 +161,90 @@ export default function App() {
     );
   };
 
+  // Handler Alur Login SecureStore
+  const handleLogin = async () => {
+    const result = await loginUser(inputNik, inputPassword);
+    Alert.alert(result.success ? "Sukses" : "Gagal", result.message);
+    if (result.success && result.session) {
+      setActiveSession(result.session);
+      const token = await getSecure(SECURE_KEYS.AUTH_TOKEN);
+      setRawToken(token);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setActiveSession(null);
+    setRawToken(null);
+    Alert.alert("Logout", "Kredensial dan token dihapus dari SecureStore.");
+  };
+
+  // Handler FileSystem Sandbox
+  const handleSavePhotoDemo = async () => {
+    try {
+      const { fileName } = await createDummyReportPhoto("Jalan Rusak Berlubang");
+      const updated = await listReportFiles();
+      setSandboxFiles(updated);
+      Alert.alert(
+        "Foto Tersimpan",
+        `Foto berhasil disimpan di sandbox lokal:\n${fileName}`,
+      );
+    } catch (err) {
+      Alert.alert("Error", "Gagal menyimpan foto ke sandbox.");
+    }
+  };
+
+  const handleSaveDocumentDemo = async () => {
+    try {
+      const fileName = `laporan_${Date.now()}.json`;
+      const sampleReport = {
+        id: `civic-${Date.now()}`,
+        judul: "Lampu Penerangan Jalan Mati",
+        kategori: "Fasilitas",
+        lokasi: { lat: center.latitude, lng: center.longitude },
+        dibuatPada: new Date().toISOString(),
+      };
+      await saveReportFile(fileName, JSON.stringify(sampleReport, null, 2));
+      const updated = await listReportFiles();
+      setSandboxFiles(updated);
+      Alert.alert("Dokumen Tersimpan", `Berkas ${fileName} berhasil dibuat.`);
+    } catch (err) {
+      Alert.alert("Error", "Gagal menyimpan dokumen laporan.");
+    }
+  };
+
+  const handleReadFileDemo = async (fileName: string) => {
+    try {
+      const content = await readReportFile(fileName);
+      setFileContentPreview(content);
+      Alert.alert(`Isi: ${fileName}`, content.slice(0, 300));
+    } catch (err) {
+      Alert.alert("Error", `Gagal membaca berkas: ${fileName}`);
+    }
+  };
+
+  const handleDeleteFileDemo = async (fileName: string) => {
+    const ok = await deleteReportFile(fileName);
+    if (ok) {
+      const updated = await listReportFiles();
+      setSandboxFiles(updated);
+      if (fileContentPreview) setFileContentPreview(null);
+    }
+  };
+
+  // Handler Runtime Permissions JIT
+  const handlePermissionRequest = async (type: CivicPermissionType) => {
+    const granted = await requestJustInTime(type);
+    if (granted) {
+      Alert.alert("Izin Diberikan", `Izin untuk ${type} berhasil diberikan!`);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <StatusBar style="dark" />
       <View style={styles.screen}>
+        {/* Header Bersama */}
         <View style={styles.header}>
           <View style={styles.brand}>
             <View style={styles.brandIcon}>
@@ -110,172 +257,446 @@ export default function App() {
           </View>
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
-            <Text style={styles.liveText}>PETA WARGA</Text>
-          </View>
-        </View>
-
-        <View style={styles.titleRow}>
-          <View>
-            <Text style={styles.pageTitle}>Pantau sekitarmu</Text>
-            <Text style={styles.pageSubtitle}>
-              Temukan laporan warga di sekitar lokasi
+            <Text style={styles.liveText}>
+              {activeTab === "milestone1" ? "PETA LBS" : "OFFLINE & SECURE"}
             </Text>
           </View>
-          <View style={styles.reportCount}>
-            <Text style={styles.reportCountNumber}>{reports.length}</Text>
-            <Text style={styles.reportCountLabel}>laporan</Text>
-          </View>
         </View>
 
-        <View style={styles.mapContainer}>
-          <MapView
-            ref={mapRef}
-            style={StyleSheet.absoluteFill}
-            initialRegion={INITIAL_REGION}
-            showsUserLocation={isTracking}
-            showsMyLocationButton={false}
-            showsCompass
-            toolbarEnabled={false}
-            loadingEnabled
-            accessibilityLabel="Peta interaktif laporan warga"
-          >
-            {reports.map((report) => {
-              const isSelected = report.id === selectedReportId;
-              return (
-                <Marker
-                  key={report.id}
-                  coordinate={{
-                    latitude: report.latitude,
-                    longitude: report.longitude,
-                  }}
-                  onPress={() => setSelectedReportId(report.id)}
-                  tracksViewChanges={false}
-                  accessibilityLabel={`${report.title}, ${report.severity}`}
-                >
-                  <View
-                    style={[
-                      styles.marker,
-                      { backgroundColor: CATEGORY_COLORS[report.category] },
-                      isSelected && styles.markerSelected,
-                    ]}
-                  >
-                    <Text style={styles.markerText}>
-                      {report.category === "Jalan"
-                        ? "!"
-                        : report.category === "Banjir"
-                          ? "~"
-                          : "+"}
-                    </Text>
-                  </View>
-                </Marker>
-              );
-            })}
-          </MapView>
-
-          <View style={styles.mapLabel}>
-            <Text style={styles.mapLabelDot}>●</Text>
-            <Text style={styles.mapLabelText}>Laporan sekitar</Text>
-          </View>
-
+        {/* Tab Navigator Milestone 1 vs Milestone 2 */}
+        <View style={styles.tabContainer}>
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              isTracking ? "Hentikan pelacakan lokasi" : "Gunakan lokasi saya"
-            }
-            style={styles.locationButton}
-            onPress={isTracking ? stopTracking : startTracking}
+            style={[
+              styles.tabButton,
+              activeTab === "milestone1" && styles.tabButtonActive,
+            ]}
+            onPress={() => setActiveTab("milestone1")}
           >
-            <Text style={styles.locationButtonIcon}>
-              {isTracking ? "■" : "◎"}
+            <Text
+              style={[
+                styles.tabButtonText,
+                activeTab === "milestone1" && styles.tabButtonTextActive,
+              ]}
+            >
+              Milestone 1: Peta & LBS
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.tabButton,
+              activeTab === "milestone2" && styles.tabButtonActive,
+            ]}
+            onPress={() => setActiveTab("milestone2")}
+          >
+            <Text
+              style={[
+                styles.tabButtonText,
+                activeTab === "milestone2" && styles.tabButtonTextActive,
+              ]}
+            >
+              Milestone 2: Secure & Files
             </Text>
           </Pressable>
         </View>
 
-        <View style={styles.panel}>
-          <View style={styles.panelHeading}>
-            <View>
-              <Text style={styles.panelTitle}>Laporan terbaru</Text>
-              <Text style={styles.panelSubtitle}>
-                Contoh titik untuk demonstrasi
-              </Text>
+        {/* KONTEN TAB 1: MILESTONE 1 (Peta, LBS, Haversine) */}
+        {activeTab === "milestone1" ? (
+          <View style={{ flex: 1 }}>
+            <View style={styles.titleRow}>
+              <View>
+                <Text style={styles.pageTitle}>Pantau sekitarmu</Text>
+                <Text style={styles.pageSubtitle}>
+                  Temukan laporan warga di sekitar lokasi
+                </Text>
+              </View>
+              <View style={styles.reportCount}>
+                <Text style={styles.reportCountNumber}>{reports.length}</Text>
+                <Text style={styles.reportCountLabel}>laporan</Text>
+              </View>
             </View>
-            <View
-              style={[
-                styles.trackingStatus,
-                isTracking && styles.trackingStatusActive,
-              ]}
-            >
-              <View
-                style={[
-                  styles.statusDot,
-                  isTracking && styles.statusDotActive,
-                ]}
-              />
-              <Text style={styles.trackingStatusText}>
-                {isTracking ? `${distanceInterval} m` : "GPS nonaktif"}
+
+            <View style={styles.mapContainer}>
+              <MapView
+                ref={mapRef}
+                style={StyleSheet.absoluteFill}
+                initialRegion={INITIAL_REGION}
+                showsUserLocation={isTracking}
+                showsMyLocationButton={false}
+                showsCompass
+                toolbarEnabled={false}
+                loadingEnabled
+                accessibilityLabel="Peta interaktif laporan warga"
+              >
+                {reports.map((report) => {
+                  const isSelected = report.id === selectedReportId;
+                  return (
+                    <Marker
+                      key={report.id}
+                      coordinate={{
+                        latitude: report.latitude,
+                        longitude: report.longitude,
+                      }}
+                      onPress={() => setSelectedReportId(report.id)}
+                      tracksViewChanges={false}
+                      accessibilityLabel={`${report.title}, ${report.severity}`}
+                    >
+                      <View
+                        style={[
+                          styles.marker,
+                          { backgroundColor: CATEGORY_COLORS[report.category] },
+                          isSelected && styles.markerSelected,
+                        ]}
+                      >
+                        <Text style={styles.markerText}>
+                          {report.category === "Jalan"
+                            ? "!"
+                            : report.category === "Banjir"
+                              ? "~"
+                              : "+"}
+                        </Text>
+                      </View>
+                    </Marker>
+                  );
+                })}
+              </MapView>
+
+              <View style={styles.mapLabel}>
+                <Text style={styles.mapLabelDot}>●</Text>
+                <Text style={styles.mapLabelText}>Laporan sekitar</Text>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isTracking ? "Hentikan pelacakan lokasi" : "Gunakan lokasi saya"
+                }
+                style={styles.locationButton}
+                onPress={isTracking ? stopTracking : startTracking}
+              >
+                <Text style={styles.locationButtonIcon}>
+                  {isTracking ? "■" : "◎"}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.panel}>
+              <View style={styles.panelHeading}>
+                <View>
+                  <Text style={styles.panelTitle}>Laporan terbaru</Text>
+                  <Text style={styles.panelSubtitle}>
+                    Contoh titik untuk demonstrasi
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.trackingStatus,
+                    isTracking && styles.trackingStatusActive,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.statusDot,
+                      isTracking && styles.statusDotActive,
+                    ]}
+                  />
+                  <Text style={styles.trackingStatusText}>
+                    {isTracking ? `${distanceInterval} m` : "GPS nonaktif"}
+                  </Text>
+                </View>
+              </View>
+
+              {error ? (
+                <View accessibilityRole="alert" style={styles.errorBanner}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.reportList}
+              >
+                {reports.map((report) => {
+                  const isSelected = report.id === selectedReportId;
+                  return (
+                    <Pressable
+                      key={report.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Pilih laporan ${report.title}`}
+                      accessibilityState={{ selected: isSelected }}
+                      onPress={() => focusReport(report)}
+                      style={[
+                        styles.reportCard,
+                        isSelected && styles.reportCardSelected,
+                      ]}
+                    >
+                      <View style={styles.cardTopRow}>
+                        <View
+                          style={[
+                            styles.categoryDot,
+                            {
+                              backgroundColor: CATEGORY_COLORS[report.category],
+                            },
+                          ]}
+                        />
+                        <Text style={styles.reportCategory}>
+                          {report.category.toUpperCase()}
+                        </Text>
+                        <Text style={styles.reportTime}>{report.reportedAt}</Text>
+                      </View>
+                      <Text style={styles.reportTitle} numberOfLines={1}>
+                        {report.title}
+                      </Text>
+                      <View style={styles.cardBottomRow}>
+                        <Text style={styles.reportSeverity}>
+                          Prioritas {report.severity.toLowerCase()}
+                        </Text>
+                        <Text style={styles.reportDistance}>
+                          {getReportDistance(report, location?.coords ?? null)}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={styles.footerNote}>
+                {isTracking
+                  ? "Lokasi diperbarui otomatis saat Anda bergerak."
+                  : "Nyalakan GPS untuk melihat jarak dan posisi Anda."}
               </Text>
             </View>
           </View>
-
-          {error ? (
-            <View accessibilityRole="alert" style={styles.errorBanner}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-
+        ) : (
+          /* KONTEN TAB 2: MILESTONE 2 (SecureStore, FileSystem Sandbox, Permissions JIT) */
           <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.reportList}
+            style={styles.m2Scroll}
+            contentContainerStyle={styles.m2ScrollContent}
           >
-            {reports.map((report) => {
-              const isSelected = report.id === selectedReportId;
-              return (
-                <Pressable
-                  key={report.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Pilih laporan ${report.title}`}
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => focusReport(report)}
-                  style={[
-                    styles.reportCard,
-                    isSelected && styles.reportCardSelected,
-                  ]}
-                >
-                  <View style={styles.cardTopRow}>
-                    <View
-                      style={[
-                        styles.categoryDot,
-                        { backgroundColor: CATEGORY_COLORS[report.category] },
-                      ]}
-                    />
-                    <Text style={styles.reportCategory}>
-                      {report.category.toUpperCase()}
-                    </Text>
-                    <Text style={styles.reportTime}>{report.reportedAt}</Text>
-                  </View>
-                  <Text style={styles.reportTitle} numberOfLines={1}>
-                    {report.title}
-                  </Text>
-                  <View style={styles.cardBottomRow}>
-                    <Text style={styles.reportSeverity}>
-                      Prioritas {report.severity.toLowerCase()}
-                    </Text>
-                    <Text style={styles.reportDistance}>
-                      {getReportDistance(report, location?.coords ?? null)}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+            {/* 1. SEKSI SECURE STORE & LOGIN */}
+            <View style={styles.m2Card}>
+              <View style={styles.m2CardHeader}>
+                <Text style={styles.m2CardBadge}>1. SECURE STORE</Text>
+                <Text style={styles.m2CardTitle}>Kredensial & Sesi Aman</Text>
+                <Text style={styles.m2CardDesc}>
+                  Penyimpanan terenkripsi (Keystore/Keychain) untuk token autentikasi, NIK, dan kredensial warga.
+                </Text>
+              </View>
 
-          <Text style={styles.footerNote}>
-            {isTracking
-              ? "Lokasi diperbarui otomatis saat Anda bergerak."
-              : "Nyalakan GPS untuk melihat jarak dan posisi Anda."}
-          </Text>
-        </View>
+              <View style={styles.m2Form}>
+                <Text style={styles.inputLabel}>NIK Warga (16 Digit)</Text>
+                <TextInput
+                  value={inputNik}
+                  onChangeText={setInputNik}
+                  keyboardType="numeric"
+                  maxLength={16}
+                  style={styles.textInput}
+                  placeholder="Masukkan 16 digit NIK"
+                />
+
+                <Text style={styles.inputLabel}>Kata Sandi</Text>
+                <TextInput
+                  value={inputPassword}
+                  onChangeText={setInputPassword}
+                  secureTextEntry
+                  style={styles.textInput}
+                  placeholder="Masukkan kata sandi"
+                />
+
+                <View style={styles.actionRow}>
+                  <Pressable
+                    style={[styles.primaryButton, { flex: 1 }]}
+                    onPress={handleLogin}
+                  >
+                    <Text style={styles.primaryButtonText}>Simpan & Login</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.dangerButton, { flex: 1 }]}
+                    onPress={handleLogout}
+                  >
+                    <Text style={styles.dangerButtonText}>Logout / Hapus</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Status Sesi Tersimpan di SecureStore */}
+              <View style={styles.sessionBox}>
+                <Text style={styles.sessionTitle}>
+                  Status SecureStore Saat Ini:
+                </Text>
+                {activeSession ? (
+                  <View style={{ gap: 4, marginTop: 4 }}>
+                    <Text style={styles.sessionText}>
+                      • NIK: <Text style={styles.bold}>{activeSession.nik}</Text>
+                    </Text>
+                    <Text style={styles.sessionText}>
+                      • Token:{" "}
+                      <Text style={styles.bold}>
+                        {rawToken ? `${rawToken.slice(0, 16)}...` : "-"}
+                      </Text>
+                    </Text>
+                    <Text style={styles.sessionText}>
+                      • Waktu Login:{" "}
+                      {new Date(activeSession.waktuLogin).toLocaleTimeString()}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.sessionEmptyText}>
+                    Belum ada kredensial yang tersimpan di SecureStore.
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* 2. SEKSI EXPO-FILE-SYSTEM SANDBOX */}
+            <View style={styles.m2Card}>
+              <View style={styles.m2CardHeader}>
+                <Text style={styles.m2CardBadge}>2. FILE SYSTEM SANDBOX</Text>
+                <Text style={styles.m2CardTitle}>Penyimpanan Berkas Laporan</Text>
+                <Text style={styles.m2CardDesc}>
+                  Manajemen folder lokal terisolasi (documentDirectory) untuk menyimpan foto bukti dan draft laporan offline.
+                </Text>
+              </View>
+
+              <Text style={styles.sandboxPathText} numberOfLines={1}>
+                Sandbox: {getSandboxDirectoryUri()}
+              </Text>
+
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={[styles.secondaryButton, { flex: 1 }]}
+                  onPress={handleSavePhotoDemo}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    + Simpan Foto Bukti
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryButton, { flex: 1 }]}
+                  onPress={handleSaveDocumentDemo}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    + Buat Laporan JSON
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Daftar Berkas Tersimpan */}
+              <View style={styles.fileListContainer}>
+                <Text style={styles.sessionTitle}>
+                  Berkas di Sandbox ({sandboxFiles.length}):
+                </Text>
+                {sandboxFiles.length === 0 ? (
+                  <Text style={styles.sessionEmptyText}>
+                    Belum ada berkas tersimpan di sandbox lokal.
+                  </Text>
+                ) : (
+                  sandboxFiles.map((file) => (
+                    <View key={file} style={styles.fileItem}>
+                      <Text style={styles.fileName} numberOfLines={1}>
+                        📄 {file}
+                      </Text>
+                      <View style={styles.fileActions}>
+                        <Pressable
+                          style={styles.fileMiniButton}
+                          onPress={() => handleReadFileDemo(file)}
+                        >
+                          <Text style={styles.fileMiniButtonText}>Baca</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.fileMiniButton,
+                            styles.fileMiniButtonDelete,
+                          ]}
+                          onPress={() => handleDeleteFileDemo(file)}
+                        >
+                          <Text
+                            style={[
+                              styles.fileMiniButtonText,
+                              styles.fileMiniButtonTextDelete,
+                            ]}
+                          >
+                            Hapus
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            {/* 3. SEKSI RUNTIME PERMISSIONS JUST-IN-TIME */}
+            <View style={styles.m2Card}>
+              <View style={styles.m2CardHeader}>
+                <Text style={styles.m2CardBadge}>3. RUNTIME PERMISSIONS (JIT)</Text>
+                <Text style={styles.m2CardTitle}>Izin Sesuai Kebutuhan</Text>
+                <Text style={styles.m2CardDesc}>
+                  Izin diminta hanya saat pengguna mengakses fiturnya. Jika ditolak permanen, aplikasi mengarahkan ke pengaturan perangkat.
+                </Text>
+              </View>
+
+              <View style={styles.permissionList}>
+                {/* Kamera */}
+                <View style={styles.permissionItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.permissionName}>Kamera</Text>
+                    <Text style={styles.permissionSub}>
+                      Status: {permissionStatuses.camera}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={styles.primaryButton}
+                    onPress={() => handlePermissionRequest("camera")}
+                  >
+                    <Text style={styles.primaryButtonText}>Minta Izin</Text>
+                  </Pressable>
+                </View>
+
+                {/* Lokasi */}
+                <View style={styles.permissionItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.permissionName}>Lokasi GPS</Text>
+                    <Text style={styles.permissionSub}>
+                      Status: {permissionStatuses.location}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={styles.primaryButton}
+                    onPress={() => handlePermissionRequest("location")}
+                  >
+                    <Text style={styles.primaryButtonText}>Minta Izin</Text>
+                  </Pressable>
+                </View>
+
+                {/* Storage */}
+                <View style={styles.permissionItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.permissionName}>Galeri / Storage</Text>
+                    <Text style={styles.permissionSub}>
+                      Status: {permissionStatuses.storage}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={styles.primaryButton}
+                    onPress={() => handlePermissionRequest("storage")}
+                  >
+                    <Text style={styles.primaryButtonText}>Minta Izin</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <Pressable
+                style={styles.settingsRedirectButton}
+                onPress={() => openDeviceSettings()}
+              >
+                <Text style={styles.settingsRedirectText}>
+                  ⚙️ Buka Pengaturan Perangkat
+                </Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -296,6 +717,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eceeec",
   },
   brand: {
     flexDirection: "row",
@@ -346,6 +769,34 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "800",
     letterSpacing: 0.6,
+  },
+  tabContainer: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eceeec",
+    gap: 8,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f2f4f4",
+  },
+  tabButtonActive: {
+    backgroundColor: "#137c68",
+  },
+  tabButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#60706d",
+  },
+  tabButtonTextActive: {
+    color: "#ffffff",
   },
   titleRow: {
     paddingHorizontal: 20,
@@ -582,5 +1033,221 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     color: "#9aa5a3",
     fontSize: 10,
+  },
+
+  /* Styling Milestone 2 */
+  m2Scroll: {
+    flex: 1,
+    backgroundColor: "#f7f8fa",
+  },
+  m2ScrollContent: {
+    padding: 16,
+    gap: 16,
+    paddingBottom: 36,
+  },
+  m2Card: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#edf0ef",
+    shadowColor: "#173a35",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  m2CardHeader: {
+    marginBottom: 12,
+  },
+  m2CardBadge: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#137c68",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  m2CardTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#173a35",
+  },
+  m2CardDesc: {
+    fontSize: 11,
+    color: "#7a8a86",
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  m2Form: {
+    gap: 8,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#465955",
+    marginTop: 4,
+  },
+  textInput: {
+    backgroundColor: "#f7f9f8",
+    borderWidth: 1,
+    borderColor: "#dde3e1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: "#173a35",
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+  primaryButton: {
+    backgroundColor: "#137c68",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  secondaryButton: {
+    backgroundColor: "#edf7f3",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryButtonText: {
+    color: "#137c68",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  dangerButton: {
+    backgroundColor: "#fff2ef",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerButtonText: {
+    color: "#c24130",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  sessionBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#f8fbf9",
+    borderWidth: 1,
+    borderColor: "#e3f0eb",
+  },
+  sessionTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1d4740",
+  },
+  sessionText: {
+    fontSize: 11,
+    color: "#4f6360",
+  },
+  sessionEmptyText: {
+    fontSize: 11,
+    color: "#97a7a3",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
+  bold: {
+    fontWeight: "700",
+    color: "#173a35",
+  },
+  sandboxPathText: {
+    fontSize: 10,
+    color: "#849390",
+    marginBottom: 8,
+  },
+  fileListContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#edf0ef",
+  },
+  fileItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f3f2",
+  },
+  fileName: {
+    flex: 1,
+    fontSize: 11,
+    color: "#304340",
+    marginRight: 8,
+  },
+  fileActions: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  fileMiniButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "#eef3f1",
+    borderRadius: 6,
+  },
+  fileMiniButtonDelete: {
+    backgroundColor: "#fdeeed",
+  },
+  fileMiniButtonText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#196657",
+  },
+  fileMiniButtonTextDelete: {
+    color: "#c24130",
+  },
+  permissionList: {
+    gap: 10,
+  },
+  permissionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 10,
+    backgroundColor: "#f7f9f8",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e6ecea",
+  },
+  permissionName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1d3a35",
+  },
+  permissionSub: {
+    fontSize: 10,
+    color: "#80928f",
+    marginTop: 2,
+    textTransform: "capitalize",
+  },
+  settingsRedirectButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    backgroundColor: "#f2f4f4",
+  },
+  settingsRedirectText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4d605c",
   },
 });

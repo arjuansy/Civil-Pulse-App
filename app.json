@@ -8,20 +8,45 @@
     "newArchEnabled": false,
     "plugins": [
       "expo-asset",
+      "expo-secure-store",
       [
         "expo-location",
         {
           "locationWhenInUsePermission": "Izinkan Civic Pulse mengakses lokasi saat aplikasi digunakan untuk menampilkan posisi Anda di peta."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Izinkan Civic Pulse mengakses kamera untuk mengambil foto dokumentasi laporan warga."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Izinkan Civic Pulse mengakses galeri foto untuk melampirkan bukti laporan warga.",
+          "savePhotosPermission": "Izinkan Civic Pulse menyimpan foto laporan ke perangkat Anda."
+        }
       ]
     ],
     "android": {
-      "package": "com.civicpulse.app"
+      "package": "com.civicpulse.app",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Civic Pulse menggunakan lokasi Anda untuk menampilkan posisi pada peta laporan warga."
+        "NSLocationWhenInUseUsageDescription": "Civic Pulse menggunakan lokasi Anda untuk menampilkan posisi pada peta laporan warga.",
+        "NSCameraUsageDescription": "Civic Pulse membutuhkan izin kamera untuk mengambil foto bukti kerusakan infrastruktur atau bencana.",
+        "NSPhotoLibraryUsageDescription": "Civic Pulse membutuhkan izin galeri untuk memilih foto laporan.",
+        "NSPhotoLibraryAddUsageDescription": "Civic Pulse membutuhkan izin untuk menyimpan foto laporan ke galeri."
       }
     }
   }
