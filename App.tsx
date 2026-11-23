@@ -8,7 +8,8 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
+import { CivicMapView } from "./src/components/CivicMapView";
+import { CivicCameraModal } from "./src/components/CivicCameraModal";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -45,7 +46,7 @@ const DEFAULT_CENTER = {
   longitude: 107.6191,
 };
 
-const INITIAL_REGION: Region = {
+const INITIAL_REGION = {
   ...DEFAULT_CENTER,
   latitudeDelta: 0.012,
   longitudeDelta: 0.012,
@@ -69,7 +70,7 @@ function getReportDistance(
 }
 
 export default function App() {
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
   const [activeTab, setActiveTab] = useState<"milestone1" | "milestone2">(
     "milestone1",
   );
@@ -107,7 +108,8 @@ export default function App() {
     null,
   );
 
-  // Milestone 2 State - 3. Runtime JIT Permissions
+  // Milestone 2 State - 3. Runtime JIT Permissions & Kamera
+  const [isCameraActive, setIsCameraActive] = useState(false);
   const {
     statuses: permissionStatuses,
     requestJustInTime,
@@ -240,6 +242,14 @@ export default function App() {
     }
   };
 
+  // Handler Buka Kamera Langsung (Just-In-Time)
+  const handleOpenCamera = async () => {
+    const granted = await requestJustInTime("camera");
+    if (granted) {
+      setIsCameraActive(true);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <StatusBar style="dark" />
@@ -316,49 +326,15 @@ export default function App() {
             </View>
 
             <View style={styles.mapContainer}>
-              <MapView
-                ref={mapRef}
-                style={StyleSheet.absoluteFill}
+              <CivicMapView
+                mapRef={mapRef}
                 initialRegion={INITIAL_REGION}
-                showsUserLocation={isTracking}
-                showsMyLocationButton={false}
-                showsCompass
-                toolbarEnabled={false}
-                loadingEnabled
-                accessibilityLabel="Peta interaktif laporan warga"
-              >
-                {reports.map((report) => {
-                  const isSelected = report.id === selectedReportId;
-                  return (
-                    <Marker
-                      key={report.id}
-                      coordinate={{
-                        latitude: report.latitude,
-                        longitude: report.longitude,
-                      }}
-                      onPress={() => setSelectedReportId(report.id)}
-                      tracksViewChanges={false}
-                      accessibilityLabel={`${report.title}, ${report.severity}`}
-                    >
-                      <View
-                        style={[
-                          styles.marker,
-                          { backgroundColor: CATEGORY_COLORS[report.category] },
-                          isSelected && styles.markerSelected,
-                        ]}
-                      >
-                        <Text style={styles.markerText}>
-                          {report.category === "Jalan"
-                            ? "!"
-                            : report.category === "Banjir"
-                              ? "~"
-                              : "+"}
-                        </Text>
-                      </View>
-                    </Marker>
-                  );
-                })}
-              </MapView>
+                isTracking={isTracking}
+                reports={reports}
+                selectedReportId={selectedReportId}
+                onSelectReport={(id) => setSelectedReportId(id)}
+                categoryColors={CATEGORY_COLORS}
+              />
 
               <View style={styles.mapLabel}>
                 <Text style={styles.mapLabelDot}>●</Text>
@@ -568,7 +544,7 @@ export default function App() {
                   onPress={handleSavePhotoDemo}
                 >
                   <Text style={styles.secondaryButtonText}>
-                    + Simpan Foto Bukti
+                    + Simpan Foto Dummy
                   </Text>
                 </Pressable>
                 <Pressable
@@ -580,6 +556,18 @@ export default function App() {
                   </Text>
                 </Pressable>
               </View>
+
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  { marginTop: 10, backgroundColor: "#0f766e" },
+                ]}
+                onPress={handleOpenCamera}
+              >
+                <Text style={styles.primaryButtonText}>
+                  📸 Buka Kamera & Ambil Foto (Uji Akses Kamera)
+                </Text>
+              </Pressable>
 
               {/* Daftar Berkas Tersimpan */}
               <View style={styles.fileListContainer}>
@@ -645,12 +633,20 @@ export default function App() {
                       Status: {permissionStatuses.camera}
                     </Text>
                   </View>
-                  <Pressable
-                    style={styles.primaryButton}
-                    onPress={() => handlePermissionRequest("camera")}
-                  >
-                    <Text style={styles.primaryButtonText}>Minta Izin</Text>
-                  </Pressable>
+                  <View style={{ flexDirection: "row", gap: 6 }}>
+                    <Pressable
+                      style={styles.secondaryButton}
+                      onPress={() => handlePermissionRequest("camera")}
+                    >
+                      <Text style={styles.secondaryButtonText}>Cek Izin</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.primaryButton}
+                      onPress={handleOpenCamera}
+                    >
+                      <Text style={styles.primaryButtonText}>Buka Kamera</Text>
+                    </Pressable>
+                  </View>
                 </View>
 
                 {/* Lokasi */}
@@ -698,6 +694,16 @@ export default function App() {
           </ScrollView>
         )}
       </View>
+
+      {/* Modal Kamera Interaktif untuk Verifikasi Akses Kamera */}
+      <CivicCameraModal
+        visible={isCameraActive}
+        onClose={() => setIsCameraActive(false)}
+        onPhotoSaved={async () => {
+          const updated = await listReportFiles();
+          setSandboxFiles(updated);
+        }}
+      />
     </SafeAreaView>
   );
 }
